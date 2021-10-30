@@ -1,6 +1,7 @@
 import gym
 from gym import spaces
 from gym.utils import seeding
+import random
 
 
 def cmp(a, b):
@@ -130,35 +131,7 @@ class BlackjackEnv(gym.Env):
     
     
 class BlackjackDoubleEnv(gym.Env):
-    """Simple blackjack environment
-
-    Blackjack is a card game where the goal is to obtain cards that sum to as
-    near as possible to 21 without going over.  They're playing against a fixed
-    dealer.
-    Face cards (Jack, Queen, King) have point value 10.
-    Aces can either count as 11 or 1, and it's called 'usable' at 11.
-    This game is placed with an infinite deck (or with replacement).
-    The game starts with dealer having one face up and one face down card, while
-    player having two face up cards. (Virtually for all Blackjack games today).
-
-    The player can request additional cards (hit=1) until they decide to stop
-    (stick=0) or exceed 21 (bust).
-
-    After the player sticks, the dealer reveals their facedown card, and draws
-    until their sum is 17 or greater.  If the dealer goes bust the player wins.
-
-    If neither player nor dealer busts, the outcome (win, lose, draw) is
-    decided by whose sum is closer to 21.  The reward for winning is +1,
-    drawing is 0, and losing is -1.
-
-    The observation of a 3-tuple of: the players current sum,
-    the dealer's one showing card (1-10 where 1 is ace),
-    and whether or not the player holds a usable ace (0 or 1).
-
-    This environment corresponds to the version of the blackjack problem
-    described in Example 5.1 in Reinforcement Learning: An Introduction
-    by Sutton and Barto.
-    http://incompleteideas.net/book/the-book-2nd.html
+    """ blackjack environment with doubling functionality
     """
 
     def __init__(self, natural=False, sab=False):
@@ -180,7 +153,103 @@ class BlackjackDoubleEnv(gym.Env):
         return [seed]
 
     def step(self, action):
-        assert self.action_space.contains(action)
+        try:
+            assert self.action_space.contains(action)
+        except:
+            print(f'No action {action} in the action space: contains action = {self.action_space.contains(action)}')
+        if action==1:  # hit: add a card to players hand and return
+            self.player.append(draw_card(self.np_random))
+            if is_bust(self.player):
+                done = True
+                reward = -1.0
+            else:
+                done = False
+                reward = 0.0
+        else:  # stick: play out the dealers hand, and score
+            done = True
+            if action==2:
+                self.player.append(draw_card(self.np_random))
+            while sum_hand(self.dealer) < 17:
+                self.dealer.append(draw_card(self.np_random))
+            reward = cmp(score(self.player), score(self.dealer))
+            if action==2:
+                reward *= 2
+            else:
+                if self.sab and is_natural(self.player) and not is_natural(self.dealer):
+                    # Player automatically wins. Rules consistent with S&B
+                    reward = 1.0
+                elif (
+                    not self.sab
+                    and self.natural
+                    and is_natural(self.player)
+                    and reward == 1.0
+                ):
+                    # Natural gives extra points, but doesn't autowin. Legacy implementation
+                    reward = 1.5
+        return self._get_obs(), reward, done, {}
+
+    def _get_obs(self):
+        return (sum_hand(self.player), self.dealer[0], usable_ace(self.player))
+
+    def reset(self):
+        self.dealer = draw_hand(self.np_random)
+        self.player = draw_hand(self.np_random)
+        return self._get_obs()
+
+
+class BlackjackDouble_6_Env(gym.Env):
+    """Blackjack environment with 6 decks
+    """
+
+    def __init__(self, decks=6, cards_to_reshuffle=15, natural=False, sab=False):
+        self.action_space = spaces.Discrete(2)
+        self.observation_space = spaces.Tuple(
+            (spaces.Discrete(32), spaces.Discrete(11), spaces.Discrete(2))
+        )
+        self.seed()
+
+        self.decks = decks
+        self.cards_to_reshuffle = cards_to_reshuffle
+
+        # 1 = Ace, 2-10 = Number cards, Jack/Queen/King = 10
+        # 13 cards x 4 suits x 6 (default) decks
+        self.init_deck = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] * 4 * decks
+        self.cur_deck = random.sample(self.init_deck, len(self.init_deck))
+        self.cards_left = len(self.cur_deck)
+
+
+        def reshuffle(self):
+            self.cards_left = len(self.cur_deck)
+            self.cur_deck = random.sample(self.init_deck, len(self.init_deck))
+            return
+
+
+        def draw_card_6(self, np_random):
+            self.cards_left -= 1
+            card = self.cur_deck[self.cards_left]
+            if cards_left <= self.cards_to_reshuffle:
+                reshuffle()
+            return card
+
+        
+        
+        # Flag to payout 1.5 on a "natural" blackjack win, like casino rules
+        # Ref: http://www.bicyclecards.com/how-to-play/blackjack/
+        self.natural = natural
+
+        # Flag for full agreement with the (Sutton and Barto, 2018) definition. Overrides self.natural
+        self.sab = sab
+
+
+    def seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
+
+    def step(self, action):
+        try:
+            assert self.action_space.contains(action)
+        except:
+            print(f'No action {action} in the action space: contains action = {self.action_space.contains(action)}')
         if action==1:  # hit: add a card to players hand and return
             self.player.append(draw_card(self.np_random))
             if is_bust(self.player):
