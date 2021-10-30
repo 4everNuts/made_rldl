@@ -197,6 +197,30 @@ class BlackjackDoubleEnv(gym.Env):
         return self._get_obs()
 
 
+counting_dict = {
+    -10: -4.79/100,
+    -9: -4.49/100,
+    -8: -4.15/100,
+    -7: -3.75/100,
+    -6: -3.30/100,
+    -5: -2.80/100,
+    -4: -2.26/100,
+    -3: -1.71/100,
+    -2: -1.12/100,
+    -1: -0.53/100,
+    0: 0.09/100,
+    10: 7.39/100,
+    9: 6.51/100,
+    8: 5.65/100,
+    7: 4.84/100,
+    6: 4.07/100,
+    5: 3.32/100,
+    4: 2.64/100,
+    3: 1.98/100,
+    2: 1.36/100,
+    1: 0.73/100
+}
+
 class BlackjackDouble_6_Env(gym.Env):
     """Blackjack environment with 6 decks
     """
@@ -216,22 +240,8 @@ class BlackjackDouble_6_Env(gym.Env):
         self.init_deck = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] * 4 * decks
         self.cur_deck = random.sample(self.init_deck, len(self.init_deck))
         self.cards_left = len(self.cur_deck)
+        self.running_count = 0
 
-
-        def reshuffle(self):
-            self.cards_left = len(self.cur_deck)
-            self.cur_deck = random.sample(self.init_deck, len(self.init_deck))
-            return
-
-
-        def draw_card_6(self, np_random):
-            self.cards_left -= 1
-            card = self.cur_deck[self.cards_left]
-            if cards_left <= self.cards_to_reshuffle:
-                reshuffle()
-            return card
-
-        
         
         # Flag to payout 1.5 on a "natural" blackjack win, like casino rules
         # Ref: http://www.bicyclecards.com/how-to-play/blackjack/
@@ -239,6 +249,39 @@ class BlackjackDouble_6_Env(gym.Env):
 
         # Flag for full agreement with the (Sutton and Barto, 2018) definition. Overrides self.natural
         self.sab = sab
+
+    def get_true_count(self):
+        return self.running_count / (self.cards_left * 52)
+
+    def get_proba_diff(self):
+        true_count = self.get_true_count() // 1
+        if true_count < -10:
+            return counting_dict[-10]
+        elif true_count > 10:
+            return counting_dict[10]
+        else:
+            return counting_dict[true_count]
+
+    def reshuffle(self):
+        self.cards_left = len(self.cur_deck)
+        self.cur_deck = random.sample(self.init_deck, len(self.init_deck))
+        self.running_count = 0
+
+
+    def draw_card_6(self):
+        self.cards_left -= 1
+        card = self.cur_deck[self.cards_left]
+        if card >= 10:
+            self.running_count -= 1
+        elif card <= 6:
+            self.running_count += 1
+        if self.cards_left <= self.cards_to_reshuffle:
+            self.reshuffle()
+        return card
+
+    
+    def draw_hand_6(self):
+        return [self.draw_card_6(), self.draw_card_6()]
 
 
     def seed(self, seed=None):
@@ -251,7 +294,7 @@ class BlackjackDouble_6_Env(gym.Env):
         except:
             print(f'No action {action} in the action space: contains action = {self.action_space.contains(action)}')
         if action==1:  # hit: add a card to players hand and return
-            self.player.append(draw_card(self.np_random))
+            self.player.append(self.draw_card_6())
             if is_bust(self.player):
                 done = True
                 reward = -1.0
@@ -261,9 +304,9 @@ class BlackjackDouble_6_Env(gym.Env):
         else:  # stick: play out the dealers hand, and score
             done = True
             if action==2:
-                self.player.append(draw_card(self.np_random))
+                self.player.append(self.draw_card_6())
             while sum_hand(self.dealer) < 17:
-                self.dealer.append(draw_card(self.np_random))
+                self.dealer.append(self.draw_card_6())
             reward = cmp(score(self.player), score(self.dealer))
             if action==2:
                 reward *= 2
@@ -285,6 +328,6 @@ class BlackjackDouble_6_Env(gym.Env):
         return (sum_hand(self.player), self.dealer[0], usable_ace(self.player))
 
     def reset(self):
-        self.dealer = draw_hand(self.np_random)
-        self.player = draw_hand(self.np_random)
+        self.dealer = self.draw_hand_6()
+        self.player = self.draw_hand_6()
         return self._get_obs()
